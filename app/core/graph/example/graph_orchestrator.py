@@ -5,7 +5,7 @@ from langchain_community.callbacks import get_openai_callback
 import time
 from functools import lru_cache
 
-from app.core.graph.example.graph_state import GraphState
+from app.core.graph.example.graph_state import GraphState, SubGraphState
 from app.core.graph.example.prompt_manager import PromptManager
 from app.core.graph.example.chain_builder import ChainManager
 
@@ -34,27 +34,59 @@ class GraphOrchestrator:
 
         
         
+    # ===== 서브 그래프 노드 =====
+
+    def _analyze_question(self, state: SubGraphState) -> Dict[str, Any]:
+        """질문을 분석합니다."""
+        question_text = state['question'].content
+        analysis = f"'{question_text}'에 대한 분석 완료"
+        print(f"  [SubGraph - Analyze] {analysis}")
+        return {"analysis": analysis}
+
+    def _generate_response(self, state: SubGraphState) -> Dict[str, Any]:
+        """분석 결과를 기반으로 응답을 생성합니다."""
+        answer = AIMessage(content=f"[SubGraph 응답] {state['analysis']} → 답변 생성 완료")
+        print(f"  [SubGraph - Response] {answer.content}")
+        return {"answer": answer}
+
+    def _build_sub_graph(self) -> Any:
+        """서브 그래프를 구성합니다."""
+        sub_builder = StateGraph(SubGraphState)
+
+        sub_builder.add_node("AnalyzeQuestion", self._analyze_question)
+        sub_builder.add_node("GenerateResponse", self._generate_response)
+
+        sub_builder.add_edge(START, "AnalyzeQuestion")
+        sub_builder.add_edge("AnalyzeQuestion", "GenerateResponse")
+        sub_builder.add_edge("GenerateResponse", END)
+
+        return sub_builder.compile()
+
+    # ===== 메인 그래프 노드 =====
+
     def _add_history_message(self, state: GraphState) -> Dict[str, Any]:
         """히스토리 메시지를 추가합니다."""
-        
-        return {"messages": [state['question'] , AIMessage(content="테스트 답변")] , "answer" : AIMessage(content="테스트 답변")}
-    
-    
+        return {"messages": [state['question'], state['answer']]}
+
+
     async def _build_graph(self, store, checkpointer) -> None:
         """LangGraph를 구성합니다."""
         graph_builder = StateGraph(GraphState)
-        
-        # 노드 추가
+
+        # 서브 그래프 빌드 & 노드 추가
+        sub_graph = self._build_sub_graph()
+        graph_builder.add_node("ProcessSubGraph", sub_graph)
         graph_builder.add_node("AddHistoryMessage", self._add_history_message)
-        
+
         # 엣지 추가
-        graph_builder.add_edge(START, "AddHistoryMessage")
+        graph_builder.add_edge(START, "ProcessSubGraph")
+        graph_builder.add_edge("ProcessSubGraph", "AddHistoryMessage")
         graph_builder.add_edge("AddHistoryMessage", END)
-        
+
         # 그래프 컴파일
         self._graph = graph_builder.compile(
             store=store,
-            checkpointer=checkpointer                                    
+            checkpointer=checkpointer
         )
     
     
