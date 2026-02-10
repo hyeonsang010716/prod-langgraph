@@ -20,3 +20,26 @@ class DeleteMessagesRequest(BaseModel):
     """메시지 삭제 요청 DTO"""
     session_id: str = Field(..., description="세션 ID")
     message_ids: Optional[List[str]] = Field(None, description="삭제할 메시지 ID 목록 (없으면 전체 삭제)")
+
+
+class MessageInfo(BaseModel):
+    """메시지 정보"""
+    id: str = Field(..., description="메시지 ID")
+    type: str = Field(..., description="메시지 타입 (human/ai)")
+    content: str = Field(..., description="메시지 내용")
+
+
+class CheckpointInfo(BaseModel):
+    """체크포인트 정보"""
+    checkpoint_id: str = Field(..., description="체크포인트 ID")
+    step: int = Field(..., description="실행 스텝")
+    timestamp: str = Field(..., description="생성 시각")
+    messages_count: int = Field(..., description="메시지 수")
+    messages: List[MessageInfo] = Field(default_factory=list, description="메시지 목록")
+
+
+class CheckpointListResponse(BaseModel):
+    """체크포인트 목록 응답 DTO"""
+    session_id: str = Field(..., description="세션 ID")
+    total: int = Field(..., description="총 체크포인트 수")
+    checkpoints: List[CheckpointInfo] = Field(default_factory=list, description="체크포인트 목록")
