@@ -1,6 +1,6 @@
 from app.dto.chat_dto import ChatRequest, ChatResponse
 from app.core.graph.example.graph_orchestrator import get_example_graph
-
+from app.util.memorysaver import inspect_all_checkpoints, inspect_single_checkpoint
 
 class ChatService:
     """채팅 서비스"""
@@ -24,3 +24,24 @@ class ChatService:
             total_cost=total_cost,
             history=history
         )
+        
+        
+    async def info(self, checkpointer):
+        """LangGraph MemorySaver 정보 추출"""
+
+        # # 모든 체크포인트 조회
+        # await inspect_all_checkpoints(checkpointer, config=None, limit=20)
+        
+        # 특정 thread만 조회
+        config = {"configurable": {"thread_id": "u1"}}
+        await inspect_all_checkpoints(checkpointer, config=config, limit=10)
+        
+        # # 단일 체크포인트 상세 조회
+        # config = {"configurable": {"thread_id": "t1", "checkpoint_id": "abc123"}}
+        # await inspect_single_checkpoint(checkpointer, config)
+
+        return True
+
+
+
+    

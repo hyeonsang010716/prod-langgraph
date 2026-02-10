@@ -1,5 +1,7 @@
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres.aio import AsyncPostgresStore
+from langgraph.store.postgres.base import PoolConfig
+from psycopg.rows import dict_row
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -20,7 +22,18 @@ async def lifespan(app: FastAPI):
     get_llm_manager()
     
     async with (
-        AsyncPostgresStore.from_conn_string(settings.POSTGRES_URL) as store,
+        AsyncPostgresStore.from_conn_string(
+            conn_string=settings.POSTGRES_URL,
+            pool_config=PoolConfig(
+                min_size=5,
+                max_size=20,
+                kwargs={
+                    "autocommit": True,
+                    "prepare_threshold": 0,
+                    "row_factory": dict_row,
+                },
+            )
+        ) as store,
         AsyncPostgresSaver.from_conn_string(settings.POSTGRES_URL) as checkpointer,
     ):
         # 첫 실행 시 테이블 생성
@@ -29,6 +42,8 @@ async def lifespan(app: FastAPI):
 
         example_graph = get_example_graph()
         await example_graph.initialize(store, checkpointer)
+        
+        app.state.checkpointer = checkpointer
 
         yield
 
