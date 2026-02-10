@@ -1,11 +1,15 @@
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.store.postgres.aio import AsyncPostgresStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 
+
 from app.config.setting import settings
 from app.core.llm_manager import get_llm_manager
-# from app.core.graph.example.graph_orchestrator import get_example_graph
+from app.core.graph.example.graph_orchestrator import get_example_graph
+from app.api.v1.router import router as v1_router
 
 
 @asynccontextmanager
@@ -15,13 +19,18 @@ async def lifespan(app: FastAPI):
     # LLM 초기화
     get_llm_manager()
     
-    # example_graph = get_example_graph()
-    # await example_graph.initialize()
-    
-    yield
-    
-    # example_graph = get_example_graph()
-    # await example_graph.cleanup()
+    async with (
+        AsyncPostgresStore.from_conn_string(settings.POSTGRES_URL) as store,
+        AsyncPostgresSaver.from_conn_string(settings.POSTGRES_URL) as checkpointer,
+    ):
+        # 첫 실행 시 테이블 생성
+        await store.setup()
+        await checkpointer.setup()
+
+        example_graph = get_example_graph()
+        await example_graph.initialize(store, checkpointer)
+
+        yield
 
 
 def create_app() -> FastAPI:
@@ -45,6 +54,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
+    app.include_router(v1_router)
+
     return app
 
 
