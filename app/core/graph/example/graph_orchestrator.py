@@ -1,5 +1,5 @@
 from typing import Optional, Any, Dict, Tuple, List
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
 from langchain_community.callbacks import get_openai_callback
 import time
@@ -93,8 +93,47 @@ class GraphOrchestrator:
     def get_graph(self) -> Any:
         """컴파일된 그래프를 반환합니다."""
         return self._graph
-    
-    
+
+
+    # ===== 메시지 삭제 =====
+
+    async def adelete_messages(self, session_id: str, message_ids: List[str]) -> dict:
+        """특정 메시지를 삭제합니다."""
+        config = {"configurable": {"thread_id": session_id}}
+
+        state = await self._graph.aget_state(config)
+        messages = state.values.get('messages', [])
+
+        if not messages:
+            return {"deleted": 0, "remaining": 0}
+
+        existing_ids = {msg.id for msg in messages}
+        valid_ids = [mid for mid in message_ids if mid in existing_ids]
+
+        if not valid_ids:
+            return {"deleted": 0, "remaining": len(messages)}
+
+        remove_messages = [RemoveMessage(id=mid) for mid in valid_ids]
+        await self._graph.aupdate_state(config, {"messages": remove_messages})
+
+        return {"deleted": len(valid_ids), "remaining": len(messages) - len(valid_ids)}
+
+    async def aclear_history(self, session_id: str) -> dict:
+        """세션의 전체 대화 히스토리를 삭제합니다."""
+        config = {"configurable": {"thread_id": session_id}}
+
+        state = await self._graph.aget_state(config)
+        messages = state.values.get('messages', [])
+
+        if not messages:
+            return {"deleted": 0}
+
+        remove_messages = [RemoveMessage(id=msg.id) for msg in messages]
+        await self._graph.aupdate_state(config, {"messages": remove_messages})
+
+        return {"deleted": len(messages)}
+
+
     async def ainvoke(
         self, 
         question: str, 

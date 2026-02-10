@@ -1,4 +1,4 @@
-from app.dto.chat_dto import ChatRequest, ChatResponse
+from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest
 from app.core.graph.example.graph_orchestrator import get_example_graph
 from app.util.memorysaver import inspect_all_checkpoints, inspect_single_checkpoint
 
@@ -43,5 +43,15 @@ class ChatService:
         return True
 
 
-
+    async def delete_messages(self, request: DeleteMessagesRequest) -> dict:
+        """메시지를 삭제합니다. message_ids가 없으면 전체 삭제."""
+        if request.message_ids:
+            return await self.graph.adelete_messages(
+                session_id=request.session_id,
+                message_ids=request.message_ids,
+            )
+        else:
+            return await self.graph.aclear_history(
+                session_id=request.session_id,
+            )
     
