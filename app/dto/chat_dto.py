@@ -43,3 +43,8 @@ class CheckpointListResponse(BaseModel):
     session_id: str = Field(..., description="세션 ID")
     total: int = Field(..., description="총 체크포인트 수")
     checkpoints: List[CheckpointInfo] = Field(default_factory=list, description="체크포인트 목록")
+
+
+class PurgeCheckpointsRequest(BaseModel):
+    """체크포인트 물리 삭제 요청 DTO"""
+    session_id: str = Field(..., description="세션 ID")

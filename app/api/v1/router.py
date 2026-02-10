@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, CheckpointListResponse
+from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, CheckpointListResponse, PurgeCheckpointsRequest
 from app.service.chat_service import ChatService
 
 router = APIRouter(prefix="/v1", tags=["v1"])
@@ -32,3 +32,10 @@ async def checkpoint_info(request: Request, session_id: str):
 async def delete_messages(request: DeleteMessagesRequest):
     """메시지 삭제 API (message_ids 없으면 전체 삭제)"""
     return await chat_service.delete_messages(request)
+
+
+@router.delete("/checkpoints/purge")
+async def purge_checkpoints(request: Request, data: PurgeCheckpointsRequest):
+    """체크포인트 물리 삭제 API (PostgreSQL에서 직접 삭제)"""
+    checkpointer = request.app.state.checkpointer
+    return await chat_service.purge_checkpoints(checkpointer, data)

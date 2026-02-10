@@ -1,6 +1,7 @@
 from app.dto.chat_dto import (
     ChatRequest, ChatResponse, DeleteMessagesRequest,
     MessageInfo, CheckpointInfo, CheckpointListResponse,
+    PurgeCheckpointsRequest,
 )
 from app.core.graph.example.graph_orchestrator import get_example_graph
 from app.util.memorysaver import inspect_all_checkpoints, inspect_single_checkpoint
@@ -91,6 +92,15 @@ class ChatService:
             total=len(checkpoints),
             checkpoints=checkpoints,
         )
+
+    async def purge_checkpoints(self, checkpointer, data: PurgeCheckpointsRequest) -> bool:
+        """PostgreSQL에서 체크포인트를 물리적으로 전체 삭제합니다."""
+        session_id = data.session_id
+
+        # 전체 삭제 - LangGraph 공식 API 사용
+        await checkpointer.adelete_thread(session_id)
+
+        return True
 
     async def delete_messages(self, request: DeleteMessagesRequest) -> dict:
         """메시지를 삭제합니다. message_ids가 없으면 전체 삭제."""
