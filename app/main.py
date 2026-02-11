@@ -42,7 +42,6 @@ async def lifespan(app: FastAPI):
 
         example_graph = get_example_graph()
         await example_graph.initialize(store, checkpointer)
-        
         app.state.checkpointer = checkpointer
 
         yield
