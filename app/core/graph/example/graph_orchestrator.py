@@ -1,6 +1,8 @@
-from typing import Optional, Any, Dict, Tuple, List
+from typing import Optional, Any, Dict, List
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import interrupt, Command
+from langgraph.errors import GraphInterrupt # 서브 그래프에서 발생한 interrupt는 raise로 안 올라옴
 from langchain_community.callbacks import get_openai_callback
 import time
 from functools import lru_cache
@@ -43,6 +45,25 @@ class GraphOrchestrator:
         print(f"  [SubGraph - Analyze] {analysis}")
         return {"analysis": analysis}
 
+    def _human_review(self, state: SubGraphState) -> Dict[str, Any]:
+        """사용자 검토를 요청합니다. (interrupt 발생 지점)"""
+        analysis = state['analysis']
+        print(f"  [SubGraph - HumanReview] interrupt 발생, 사용자 검토 대기중...")
+
+        # 여기서 실행이 중단됨. resume 시 user_decision에 값이 들어옴
+        user_decision = interrupt({
+            "analysis": analysis,
+            "message": "분석 결과를 검토해주세요. 'approve'로 승인하거나, 수정된 분석 내용을 입력하세요.",
+        })
+
+        # resume 후 이 코드가 실행됨
+        if user_decision == "approve":
+            print(f"  [SubGraph - HumanReview] 승인됨, 기존 분석 유지")
+            return {"analysis": analysis}
+        else:
+            print(f"  [SubGraph - HumanReview] 수정됨: {user_decision}")
+            return {"analysis": user_decision}
+
     def _generate_response(self, state: SubGraphState) -> Dict[str, Any]:
         """분석 결과를 기반으로 응답을 생성합니다."""
         answer = AIMessage(content=f"[SubGraph 응답] {state['analysis']} → 답변 생성 완료")
@@ -54,10 +75,12 @@ class GraphOrchestrator:
         sub_builder = StateGraph(SubGraphState)
 
         sub_builder.add_node("AnalyzeQuestion", self._analyze_question)
+        sub_builder.add_node("HumanReview", self._human_review)
         sub_builder.add_node("GenerateResponse", self._generate_response)
 
         sub_builder.add_edge(START, "AnalyzeQuestion")
-        sub_builder.add_edge("AnalyzeQuestion", "GenerateResponse")
+        sub_builder.add_edge("AnalyzeQuestion", "HumanReview")
+        sub_builder.add_edge("HumanReview", "GenerateResponse")
         sub_builder.add_edge("GenerateResponse", END)
 
         return sub_builder.compile()
@@ -134,35 +157,73 @@ class GraphOrchestrator:
         return {"deleted": len(messages)}
 
 
-    async def ainvoke(
-        self, 
-        question: str, 
-        session_id: str
-    ) -> Tuple[str, float, int, float, List]:
-        """그래프를 실행합니다.
-        
-        Returns:
-            tuple: (answer, execution_time, total_tokens, total_cost, history)
-        """
+    async def _extract_interrupt_info(self, config: dict) -> dict:
+        """현재 상태에서 interrupt 정보를 추출합니다."""
+        state = await self._graph.aget_state(config)
+        for task in state.tasks:
+            if hasattr(task, 'interrupts') and task.interrupts:
+                return task.interrupts[0].value
+        return {}
+
+    async def ainvoke(self, question: str, session_id: str) -> dict:
+        """그래프를 실행합니다. interrupt 발생 시 중단 정보를 반환합니다."""
         input_data = {"question": HumanMessage(content=question)}
         config = {"configurable": {"thread_id": session_id}}
-            
+
         start_time = time.perf_counter()
-        
+
         with get_openai_callback() as cb:
             response = await self._graph.ainvoke(input_data, config)
-        
-        end_time = time.perf_counter()
-    
-        answer_content = response['answer'].content
-        
-        return (
-            answer_content,
-            end_time - start_time, 
-            cb.total_tokens, 
-            cb.total_cost,
-            response['messages']
-        )
+
+        execution_time = time.perf_counter() - start_time
+
+        # interrupt 여부 확인: aget_state의 next가 있으면 아직 실행할 노드가 남아있음
+        state = await self._graph.aget_state(config)
+        if state.next:
+            return {
+                "status": "interrupted",
+                "execution_time": execution_time,
+                "interrupt_info": await self._extract_interrupt_info(config),
+            }
+
+        return {
+            "status": "completed",
+            "answer": response['answer'].content,
+            "execution_time": execution_time,
+            "total_tokens": cb.total_tokens,
+            "total_cost": cb.total_cost,
+            "messages": response['messages'],
+        }
+
+    async def aresume(self, session_id: str, action: str) -> dict:
+        """interrupt된 그래프를 재개합니다."""
+        config = {"configurable": {"thread_id": session_id}}
+
+        start_time = time.perf_counter()
+
+        with get_openai_callback() as cb:
+            response = await self._graph.ainvoke(
+                Command(resume=action), config
+            )
+
+        execution_time = time.perf_counter() - start_time
+
+        state = await self._graph.aget_state(config)
+        if state.next:
+            return {
+                "status": "interrupted",
+                "execution_time": execution_time,
+                "interrupt_info": await self._extract_interrupt_info(config),
+            }
+
+        return {
+            "status": "completed",
+            "answer": response['answer'].content,
+            "execution_time": execution_time,
+            "total_tokens": cb.total_tokens,
+            "total_cost": cb.total_cost,
+            "messages": response['messages'],
+        }
     
     
 @lru_cache(maxsize=1)

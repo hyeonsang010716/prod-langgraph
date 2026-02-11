@@ -9,11 +9,19 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """채팅 응답 DTO"""
-    answer: str = Field(..., description="AI 응답")
-    execution_time: float = Field(..., description="실행 시간 (초)")
-    total_tokens: int = Field(..., description="총 토큰 수")
-    total_cost: float = Field(..., description="총 비용 (USD)")
-    history: List = Field(default_factory=[], description="히스토리")
+    status: str = Field("completed", description="상태 (completed/interrupted)")
+    answer: str = Field("", description="AI 응답")
+    execution_time: float = Field(0, description="실행 시간 (초)")
+    total_tokens: int = Field(0, description="총 토큰 수")
+    total_cost: float = Field(0, description="총 비용 (USD)")
+    history: List = Field(default_factory=list, description="히스토리")
+    interrupt_info: Optional[dict] = Field(None, description="인터럽트 정보")
+
+
+class ResumeRequest(BaseModel):
+    """Human-in-the-loop 재개 요청 DTO"""
+    session_id: str = Field(..., description="세션 ID")
+    action: str = Field(..., description="approve: 승인 / 문자열: 수정된 분석 내용")
 
 
 class DeleteMessagesRequest(BaseModel):

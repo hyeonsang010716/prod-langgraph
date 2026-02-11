@@ -1,7 +1,7 @@
 from app.dto.chat_dto import (
     ChatRequest, ChatResponse, DeleteMessagesRequest,
     MessageInfo, CheckpointInfo, CheckpointListResponse,
-    PurgeCheckpointsRequest,
+    PurgeCheckpointsRequest, ResumeRequest,
 )
 from app.core.graph.example.graph_orchestrator import get_example_graph
 from app.util.memorysaver import inspect_all_checkpoints, inspect_single_checkpoint
@@ -15,18 +15,48 @@ class ChatService:
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
         """LangGraph를 통해 채팅 응답을 생성합니다."""
-
-        answer, execution_time, total_tokens, total_cost, history = await self.graph.ainvoke(
+        result = await self.graph.ainvoke(
             question=request.question,
             session_id=request.session_id,
         )
 
+        if result["status"] == "interrupted":
+            return ChatResponse(
+                status="interrupted",
+                execution_time=round(result["execution_time"], 3),
+                interrupt_info=result["interrupt_info"],
+            )
+
         return ChatResponse(
-            answer=answer,
-            execution_time=round(execution_time, 3),
-            total_tokens=total_tokens,
-            total_cost=total_cost,
-            history=history
+            status="completed",
+            answer=result["answer"],
+            execution_time=round(result["execution_time"], 3),
+            total_tokens=result["total_tokens"],
+            total_cost=result["total_cost"],
+            history=result["messages"],
+        )
+
+    async def resume(self, request: ResumeRequest) -> ChatResponse:
+        """interrupt된 그래프를 재개합니다."""
+        result = await self.graph.aresume(
+            session_id=request.session_id,
+            action=request.action,
+        )
+
+        if result["status"] == "interrupted":
+            return ChatResponse(
+                status="interrupted",
+                execution_time=round(result["execution_time"], 3),
+                interrupt_info=result["interrupt_info"],
+            )
+
+        return ChatResponse(
+            status="completed",
+            answer=result["answer"],
+            execution_time=round(result["execution_time"], 3),
+            total_tokens=result["total_tokens"],
+            total_cost=result["total_cost"],
+            history=result["messages"],
         )
         
         

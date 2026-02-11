@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, CheckpointListResponse, PurgeCheckpointsRequest
+from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, CheckpointListResponse, PurgeCheckpointsRequest, ResumeRequest
 from app.service.chat_service import ChatService
 
 router = APIRouter(prefix="/v1", tags=["v1"])
@@ -12,6 +12,12 @@ chat_service = ChatService()
 async def chat(request: ChatRequest):
     """LangGraph 채팅 API"""
     return await chat_service.chat(request)
+
+
+@router.post("/chat/resume", response_model=ChatResponse)
+async def resume(request: ResumeRequest):
+    """Human-in-the-loop 재개 API"""
+    return await chat_service.resume(request)
 
 
 @router.post("/print-all-info")
