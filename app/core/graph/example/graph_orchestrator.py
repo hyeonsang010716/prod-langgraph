@@ -312,8 +312,8 @@ class GraphOrchestrator:
             "total_cost": cb.total_cost,
             "messages": response['messages'],
         }
-    
-    
+
+
 @lru_cache(maxsize=1)
 def get_example_graph() -> GraphOrchestrator:
     """GraphOrchestrator 싱글톤 인스턴스를 반환합니다."""

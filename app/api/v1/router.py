@@ -1,17 +1,26 @@
 from fastapi import APIRouter, Request
 
 from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, CheckpointListResponse, PurgeCheckpointsRequest, ResumeRequest
+from app.core.graph.stream.stream_response import create_sse_response
 from app.service.chat_service import ChatService
+from app.service.stream_service import StreamService
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
 chat_service = ChatService()
+stream_service = StreamService()
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """LangGraph 채팅 API"""
     return await chat_service.chat(request)
+
+
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """LangGraph 채팅 SSE 스트리밍 API"""
+    return create_sse_response(stream_service.stream_chat(request))
 
 
 @router.post("/chat/resume", response_model=ChatResponse)

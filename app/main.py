@@ -11,6 +11,7 @@ import uvicorn
 from app.config.setting import settings
 from app.core.llm_manager import get_llm_manager
 from app.core.graph.example.graph_orchestrator import get_example_graph
+from app.core.graph.stream.stream_graph import get_stream_graph
 from app.api.v1.router import router as v1_router
 
 
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
 
         example_graph = get_example_graph()
         await example_graph.initialize(store, checkpointer)
+
+        stream_graph = get_stream_graph()
+        await stream_graph.initialize(store, checkpointer)
+
         app.state.checkpointer = checkpointer
 
         yield
@@ -62,7 +67,7 @@ def create_app() -> FastAPI:
     
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], # Frontend URL 권한 부여
+        allow_origins=["http://127.0.0.1:5500", "http://127.0.0.1:5501"], # Frontend URL 권한 부여
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
