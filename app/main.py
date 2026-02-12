@@ -13,6 +13,7 @@ from app.core.llm_manager import get_llm_manager
 from app.core.graph.example.graph_orchestrator import get_example_graph
 from app.core.graph.stream.stream_graph import get_stream_graph
 from app.api.v1.router import router as v1_router
+from app.api.graphql.router import graphql_router
 
 
 @asynccontextmanager
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     )
     
     app.include_router(v1_router)
+    app.include_router(graphql_router, prefix="/graphql")
 
     return app
 

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphQL Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== Header ===== */
+        header {
+            padding: 14px 24px;
+            border-bottom: 1px solid #2a2a2a;
+            background: #161616;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+        header .endpoint {
+            font-size: 11px;
+            color: #666;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+
+        /* ===== Main Layout ===== */
+        .main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            overflow: hidden;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .panel:first-child { border-right: 1px solid #2a2a2a; }
+
+        /* ===== Presets ===== */
+        .presets {
+            padding: 10px 16px;
+            border-bottom: 1px solid #2a2a2a;
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+            background: #131313;
+        }
+        .preset-btn {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            padding: 5px 12px;
+            color: #999;
+            font-size: 12px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .preset-btn:hover { background: #252525; border-color: #444; color: #fff; }
+        .preset-btn.mutation { border-left: 2px solid #a78bfa; }
+        .preset-btn.query { border-left: 2px solid #4ade80; }
+
+        /* ===== Section Headers ===== */
+        .section-header {
+            padding: 8px 16px;
+            background: #161616;
+            border-bottom: 1px solid #2a2a2a;
+            font-size: 11px;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .section-header .dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+        }
+        .section-header .dot.purple { background: #a78bfa; }
+        .section-header .dot.blue { background: #60a5fa; }
+        .section-header .dot.green { background: #4ade80; }
+
+        /* ===== Editors ===== */
+        .editor-wrap {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .editor-wrap.variables {
+            flex: 1;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        textarea {
+            flex: 1;
+            background: #0f0f0f;
+            border: none;
+            color: #d4d4d4;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 12px 16px;
+            resize: none;
+            outline: none;
+            tab-size: 2;
+        }
+        textarea::placeholder { color: #333; }
+
+        /* ===== Toolbar ===== */
+        .toolbar {
+            padding: 10px 16px;
+            border-top: 1px solid #2a2a2a;
+            background: #161616;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .run-btn {
+            background: #a78bfa;
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 24px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .run-btn:hover { opacity: 0.85; }
+        .run-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .shortcut-hint {
+            font-size: 11px;
+            color: #444;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+        .status {
+            font-size: 12px;
+            color: #555;
+            margin-left: auto;
+        }
+        .status.loading { color: #fbbf24; }
+
+        /* ===== Response Panel ===== */
+        .response-header {
+            padding: 10px 16px;
+            border-bottom: 1px solid #2a2a2a;
+            background: #161616;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .response-header h2 {
+            font-size: 11px;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .timing {
+            font-size: 11px;
+            color: #555;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+
+        .result-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .result-area .success { color: #4ade80; }
+        .result-area .error { color: #f87171; }
+        .result-area .info { color: #444; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>GraphQL Client</h1>
+        <span class="endpoint">http://127.0.0.1:8000/graphql</span>
+    </header>
+
+    <div class="main">
+        <!-- Left: Editor -->
+        <div class="panel">
+            <div class="presets">
+                <button class="preset-btn mutation" onclick="loadPreset('chat')">chat</button>
+                <button class="preset-btn mutation" onclick="loadPreset('resume')">resume</button>
+                <button class="preset-btn query" onclick="loadPreset('checkpoints')">checkpoints</button>
+                <button class="preset-btn mutation" onclick="loadPreset('deleteMessages')">delete</button>
+            </div>
+
+            <div class="section-header"><span class="dot purple"></span>Query</div>
+            <div class="editor-wrap">
+                <textarea id="queryEditor" spellcheck="false" placeholder="GraphQL query..."></textarea>
+            </div>
+
+            <div class="editor-wrap variables">
+                <div class="section-header"><span class="dot blue"></span>Variables</div>
+                <textarea id="variablesEditor" spellcheck="false" placeholder='{ }'></textarea>
+            </div>
+
+            <div class="toolbar">
+                <button class="run-btn" id="runBtn" onclick="executeQuery()">Execute</button>
+                <span class="shortcut-hint">Ctrl + Enter</span>
+                <span class="status" id="status"></span>
+            </div>
+        </div>
+
+        <!-- Right: Response -->
+        <div class="panel">
+            <div class="response-header">
+                <h2><span class="dot green"></span>Response</h2>
+                <span class="timing" id="timing"></span>
+            </div>
+            <div class="result-area" id="resultArea"><span class="info">// Execute a query to see results</span></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://127.0.0.1:8000/graphql';
+        const queryEditor = document.getElementById('queryEditor');
+        const variablesEditor = document.getElementById('variablesEditor');
+        const resultArea = document.getElementById('resultArea');
+        const runBtn = document.getElementById('runBtn');
+        const statusEl = document.getElementById('status');
+        const timingEl = document.getElementById('timing');
+
+        const PRESETS = {
+            chat: {
+                query: `mutation Chat($question: String!, $sessionId: String!) {
+  chat(question: $question, sessionId: $sessionId) {
+    status
+    answer
+    executionTime
+    totalTokens
+    totalCost
+    interruptInfo
+  }
+}`,
+                variables: { question: "안녕하세요! 자기소개 해주세요.", sessionId: "graphql-test-1" },
+            },
+            resume: {
+                query: `mutation Resume($sessionId: String!, $action: String!) {
+  resume(sessionId: $sessionId, action: $action) {
+    status
+    answer
+    executionTime
+    totalTokens
+    totalCost
+    interruptInfo
+  }
+}`,
+                variables: { sessionId: "graphql-test-1", action: "approve" },
+            },
+            checkpoints: {
+                query: `query Checkpoints($sessionId: String!) {
+  checkpoints(sessionId: $sessionId) {
+    sessionId
+    total
+    checkpoints {
+      checkpointId
+      step
+      timestamp
+      messagesCount
+      messages {
+        id
+        type
+        content
+      }
+    }
+  }
+}`,
+                variables: { sessionId: "graphql-test-1" },
+            },
+            deleteMessages: {
+                query: `mutation DeleteMessages($sessionId: String!) {
+  deleteMessages(sessionId: $sessionId) {
+    deleted
+    remaining
+  }
+}`,
+                variables: { sessionId: "graphql-test-1" },
+            },
+        };
+
+        loadPreset('chat');
+
+        function loadPreset(name) {
+            const preset = PRESETS[name];
+            queryEditor.value = preset.query;
+            variablesEditor.value = JSON.stringify(preset.variables, null, 2);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') executeQuery();
+        });
+
+        queryEditor.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const s = queryEditor.selectionStart;
+                queryEditor.value = queryEditor.value.substring(0, s) + '  ' + queryEditor.value.substring(queryEditor.selectionEnd);
+                queryEditor.selectionStart = queryEditor.selectionEnd = s + 2;
+            }
+        });
+
+        async function executeQuery() {
+            const query = queryEditor.value.trim();
+            if (!query) return;
+
+            let variables = {};
+            try {
+                const v = variablesEditor.value.trim();
+                if (v) variables = JSON.parse(v);
+            } catch (e) {
+                resultArea.innerHTML = `<span class="error">// Variables JSON parse error\n${e.message}</span>`;
+                return;
+            }
+
+            runBtn.disabled = true;
+            statusEl.textContent = 'Executing...';
+            statusEl.className = 'status loading';
+            timingEl.textContent = '';
+            resultArea.innerHTML = '<span class="info">// ...</span>';
+
+            const t0 = performance.now();
+
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, variables }),
+                });
+
+                const ms = Math.round(performance.now() - t0);
+                timingEl.textContent = `${ms}ms`;
+
+                const data = await res.json();
+
+                if (data.errors) {
+                    resultArea.innerHTML = `<span class="error">${JSON.stringify(data, null, 2)}</span>`;
+                    statusEl.textContent = `Error`;
+                    statusEl.className = 'status';
+                } else {
+                    resultArea.innerHTML = `<span class="success">${JSON.stringify(data, null, 2)}</span>`;
+                    statusEl.textContent = `${res.status} OK`;
+                    statusEl.className = 'status';
+                }
+            } catch (err) {
+                timingEl.textContent = `${Math.round(performance.now() - t0)}ms`;
+                resultArea.innerHTML = `<span class="error">// Network error\n${err.message}</span>`;
+                statusEl.textContent = 'Failed';
+                statusEl.className = 'status';
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

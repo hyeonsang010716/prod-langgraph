@@ -32,6 +32,7 @@ dependencies = [
     "pytz==2024.1",
     "redis==6.4.0",
     "sqlalchemy[asyncio]==2.0.43",
+    "strawberry-graphql[fastapi]>=0.291.3",
 ]
 
 [tool.pytest.ini_options]
