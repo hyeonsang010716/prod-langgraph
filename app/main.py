@@ -12,6 +12,7 @@ from app.config.setting import settings
 from app.core.llm_manager import get_llm_manager
 from app.core.graph.example.graph_orchestrator import get_example_graph
 from app.core.graph.stream.stream_graph import get_stream_graph
+from app.core.graph.handoffs.handoffs_graph import get_handoffs_graph
 from app.api.v1.router import router as v1_router
 from app.api.graphql.router import graphql_router
 
@@ -47,6 +48,9 @@ async def lifespan(app: FastAPI):
 
         stream_graph = get_stream_graph()
         await stream_graph.initialize(store, checkpointer)
+
+        handoffs_graph = get_handoffs_graph()
+        await handoffs_graph.initialize(store, checkpointer)
 
         app.state.checkpointer = checkpointer
 

@@ -4,11 +4,13 @@ from app.dto.chat_dto import ChatRequest, ChatResponse, DeleteMessagesRequest, C
 from app.core.graph.stream.stream_response import create_sse_response
 from app.service.chat_service import ChatService
 from app.service.stream_service import StreamService
+from app.service.handoffs_service import HandoffsService
 
 router = APIRouter(prefix="/v1", tags=["v1"])
 
 chat_service = ChatService()
 stream_service = StreamService()
+handoffs_service = HandoffsService()
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -21,6 +23,31 @@ async def chat(request: ChatRequest):
 async def chat_stream(request: ChatRequest):
     """LangGraph 채팅 SSE 스트리밍 API"""
     return create_sse_response(stream_service.stream_chat(request))
+
+
+@router.post("/handoffs")
+async def handoffs_chat(request: ChatRequest):
+    """멀티 에이전트 Handoffs 채팅 API
+
+    interrupt 발생 시 status="interrupted"와 interrupt_info를 반환합니다.
+    이 경우 /handoffs/resume으로 재개해야 합니다.
+    """
+    return await handoffs_service.chat(
+        question=request.question,
+        session_id=request.session_id,
+    )
+
+
+@router.post("/handoffs/resume")
+async def handoffs_resume(request: ResumeRequest):
+    """Handoffs interrupt 재개 API
+
+    interrupt된 핸드오프를 사용자 응답(승인/거절)으로 재개합니다.
+    """
+    return await handoffs_service.resume(
+        session_id=request.session_id,
+        action=request.action,
+    )
 
 
 @router.post("/chat/resume", response_model=ChatResponse)
