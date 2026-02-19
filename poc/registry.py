@@ -12,17 +12,31 @@ from pydantic import BaseModel, Field as PydanticField
 
 
 @dataclass
+class ToolParam:
+    """도구 파라미터 정의
+
+    name: 파라미터 이름 (영문, LLM이 JSON key로 사용)
+    description: LLM이 파라미터를 채울 때 참고하는 설명
+    """
+
+    name: str
+    description: str
+
+
+@dataclass
 class ToolConfig:
     """에이전트 도구 설정
 
     name: 도구 이름 (영문, 에이전트 내 고유)
     description: LLM이 도구를 선택할 때 참고하는 설명
-    mock_response: POC용 목업 응답 ({query}로 입력값 치환 가능)
+    mock_response: POC용 목업 응답 (파라미터 이름으로 치환 가능, 예: {phone_number})
+    parameters: 도구 입력 파라미터 목록 (빈 리스트면 query: str 단일 파라미터)
     """
 
     name: str
     description: str
     mock_response: str
+    parameters: list[ToolParam] = field(default_factory=list)
 
 
 @dataclass
@@ -56,13 +70,19 @@ DEFAULT_AGENTS = [
         tools=[
             ToolConfig(
                 name="check_rental_price",
-                description="렌탈 상품의 월 렌탈료를 조회합니다. 상품명을 입력하세요.",
-                mock_response="'{query}' 상품의 월 렌탈료는 35,000원입니다. (약정기간: 36개월, 등록비: 무료)",
+                description="렌탈 상품의 월 렌탈료를 조회합니다.",
+                mock_response="'{product_name}' 상품의 월 렌탈료는 35,000원입니다. (약정기간: 36개월, 등록비: 무료)",
+                parameters=[
+                    ToolParam(name="product_name", description="조회할 렌탈 상품명 (예: 정수기, 공기청정기, 비데)"),
+                ],
             ),
             ToolConfig(
                 name="check_rental_availability",
                 description="렌탈 상품의 재고 및 렌탈 가능 여부를 확인합니다.",
-                mock_response="'{query}' 상품은 현재 렌탈 가능합니다. 설치 가능일: 3영업일 이내",
+                mock_response="'{product_name}' 상품은 현재 렌탈 가능합니다. 설치 가능일: 3영업일 이내",
+                parameters=[
+                    ToolParam(name="product_name", description="재고 확인할 렌탈 상품명"),
+                ],
             ),
         ],
     ),
@@ -79,12 +99,19 @@ DEFAULT_AGENTS = [
             ToolConfig(
                 name="track_delivery",
                 description="주문번호로 배송 상태를 조회합니다.",
-                mock_response="주문 '{query}'의 배송 상태: 배송중 (현재 OO물류센터 → 고객 지역 배송 예정)",
+                mock_response="주문 '{order_id}'의 배송 상태: 배송중 (현재 OO물류센터 → 고객 지역 배송 예정)",
+                parameters=[
+                    ToolParam(name="order_id", description="조회할 주문번호 (예: ORD-2024-00123)"),
+                ],
             ),
             ToolConfig(
                 name="change_delivery_address",
-                description="배송지 주소를 변경합니다. 새 주소를 입력하세요.",
-                mock_response="배송지가 '{query}'(으)로 변경 요청되었습니다. 확인 후 반영됩니다.",
+                description="배송지 주소를 변경합니다.",
+                mock_response="주문 '{order_id}'의 배송지가 '{new_address}'(으)로 변경 요청되었습니다. 확인 후 반영됩니다.",
+                parameters=[
+                    ToolParam(name="order_id", description="주문번호"),
+                    ToolParam(name="new_address", description="변경할 새 배송지 주소"),
+                ],
             ),
         ],
     ),
@@ -100,13 +127,56 @@ DEFAULT_AGENTS = [
         tools=[
             ToolConfig(
                 name="submit_service_request",
-                description="A/S 요청을 접수합니다. 증상을 설명해주세요.",
-                mock_response="A/S 접수 완료 — 접수번호: AS-2024-{query}. 엔지니어 방문 예정일: 2~3영업일 이내",
+                description="A/S 요청을 접수합니다.",
+                mock_response="A/S 접수 완료 — 접수번호: AS-2024-00456. 제품: '{product_name}', 증상: '{symptom}'. 엔지니어 방문 예정일: 2~3영업일 이내",
+                parameters=[
+                    ToolParam(name="product_name", description="A/S 대상 제품명 (예: 정수기, 공기청정기)"),
+                    ToolParam(name="symptom", description="고장 증상 상세 설명"),
+                ],
             ),
             ToolConfig(
                 name="check_warranty",
-                description="제품의 보증기간을 확인합니다. 제품명 또는 시리얼번호를 입력하세요.",
-                mock_response="'{query}' 제품 보증 상태: 무상 보증기간 내 (만료일: 2025-12-31)",
+                description="제품의 보증기간을 확인합니다.",
+                mock_response="'{serial_number}' 제품 보증 상태: 무상 보증기간 내 (만료일: 2025-12-31)",
+                parameters=[
+                    ToolParam(name="serial_number", description="제품 시리얼번호 또는 제품명"),
+                ],
+            ),
+        ],
+    ),
+    AgentConfig(
+        key="customer",
+        description="고객정보 조회, 본인확인, 계약자 확인, 연락처 입력, 생년월일 인증 관련 상담",
+        prompt=(
+            "당신은 고객정보 조회 및 본인확인 전문 에이전트입니다.\n"
+            "고객의 계약자 정보를 확인하고 본인 인증을 처리합니다.\n"
+            "연락처가 미입력된 경우 전화번호 입력을 안내하고, "
+            "생년월일 불일치 시 재입력을 요청합니다.\n"
+            "항상 친절하고 전문적으로 한국어로 답변하세요."
+        ),
+        tools=[
+            ToolConfig(
+                name="lookup_customer_by_phone",
+                description="계약자의 전화번호로 고객정보를 조회합니다. 연락처가 미입력된 경우 전화번호를 입력받아 조회합니다.",
+                mock_response=(
+                    "전화번호 '{phone_number}'(으)로 조회한 결과, "
+                    "계약자명: 홍길동, 계약번호: CT-2024-00123, "
+                    "계약상품: 정수기 렌탈 (36개월). 고객정보 확인이 완료되었습니다."
+                ),
+                parameters=[
+                    ToolParam(name="phone_number", description="계약자 전화번호 (예: 01012345678)"),
+                ],
+            ),
+            ToolConfig(
+                name="verify_customer_birthday",
+                description="계약자의 생년월일로 본인확인을 진행합니다. 생년월일이 불일치하면 재입력을 요청합니다.",
+                mock_response=(
+                    "생년월일 '{birthday}'(으)로 본인확인을 진행합니다. "
+                    "본인확인이 완료되었습니다. 계약자: 홍길동님, 인증 성공."
+                ),
+                parameters=[
+                    ToolParam(name="birthday", description="계약자 생년월일 6자리 (예: 810902)"),
+                ],
             ),
         ],
     ),
@@ -167,7 +237,12 @@ class AgentRegistry:
     # ── Tool CRUD ──
 
     def add_tool(
-        self, agent_key: str, name: str, description: str, mock_response: str
+        self,
+        agent_key: str,
+        name: str,
+        description: str,
+        mock_response: str,
+        parameters: list[ToolParam] | None = None,
     ) -> ToolConfig:
         """에이전트에 도구를 추가합니다."""
         with self._lock:
@@ -177,7 +252,10 @@ class AgentRegistry:
             # 같은 이름 도구가 있으면 교체
             config.tools = [t for t in config.tools if t.name != name]
             tool = ToolConfig(
-                name=name, description=description, mock_response=mock_response
+                name=name,
+                description=description,
+                mock_response=mock_response,
+                parameters=parameters or [],
             )
             config.tools.append(tool)
             self._version += 1
@@ -250,5 +328,9 @@ class AgentRegistry:
         data = json.loads(self._persist_path.read_text())
         for key, config_dict in data.items():
             tools_raw = config_dict.pop("tools", [])
-            tools = [ToolConfig(**t) for t in tools_raw]
+            tools = []
+            for t in tools_raw:
+                params_raw = t.pop("parameters", [])
+                params = [ToolParam(**p) for p in params_raw]
+                tools.append(ToolConfig(**t, parameters=params))
             self._agents[key] = AgentConfig(**config_dict, tools=tools)

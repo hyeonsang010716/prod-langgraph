@@ -6,13 +6,25 @@
     "tools": [
       {
         "name": "check_rental_price",
-        "description": "렌탈 상품의 월 렌탈료를 조회합니다. 상품명을 입력하세요.",
-        "mock_response": "'{query}' 상품의 월 렌탈료는 35,000원입니다. (약정기간: 36개월, 등록비: 무료)"
+        "description": "렌탈 상품의 월 렌탈료를 조회합니다.",
+        "mock_response": "'{product_name}' 상품의 월 렌탈료는 35,000원입니다. (약정기간: 36개월, 등록비: 무료)",
+        "parameters": [
+          {
+            "name": "product_name",
+            "description": "조회할 렌탈 상품명 (예: 정수기, 공기청정기, 비데)"
+          }
+        ]
       },
       {
         "name": "check_rental_availability",
         "description": "렌탈 상품의 재고 및 렌탈 가능 여부를 확인합니다.",
-        "mock_response": "'{query}' 상품은 현재 렌탈 가능합니다. 설치 가능일: 3영업일 이내"
+        "mock_response": "'{product_name}' 상품은 현재 렌탈 가능합니다. 설치 가능일: 3영업일 이내",
+        "parameters": [
+          {
+            "name": "product_name",
+            "description": "재고 확인할 렌탈 상품명"
+          }
+        ]
       }
     ]
   },
@@ -24,12 +36,28 @@
       {
         "name": "track_delivery",
         "description": "주문번호로 배송 상태를 조회합니다.",
-        "mock_response": "주문 '{query}'의 배송 상태: 배송중 (현재 OO물류센터 → 고객 지역 배송 예정)"
+        "mock_response": "주문 '{order_id}'의 배송 상태: 배송중 (현재 OO물류센터 → 고객 지역 배송 예정)",
+        "parameters": [
+          {
+            "name": "order_id",
+            "description": "조회할 주문번호 (예: ORD-2024-00123)"
+          }
+        ]
       },
       {
         "name": "change_delivery_address",
-        "description": "배송지 주소를 변경합니다. 새 주소를 입력하세요.",
-        "mock_response": "배송지가 '{query}'(으)로 변경 요청되었습니다. 확인 후 반영됩니다."
+        "description": "배송지 주소를 변경합니다.",
+        "mock_response": "주문 '{order_id}'의 배송지가 '{new_address}'(으)로 변경 요청되었습니다. 확인 후 반영됩니다.",
+        "parameters": [
+          {
+            "name": "order_id",
+            "description": "주문번호"
+          },
+          {
+            "name": "new_address",
+            "description": "변경할 새 배송지 주소"
+          }
+        ]
       }
     ]
   },
@@ -40,25 +68,58 @@
     "tools": [
       {
         "name": "submit_service_request",
-        "description": "A/S 요청을 접수합니다. 증상을 설명해주세요.",
-        "mock_response": "A/S 접수 완료 — 접수번호: AS-2024-{query}. 엔지니어 방문 예정일: 2~3영업일 이내"
+        "description": "A/S 요청을 접수합니다.",
+        "mock_response": "A/S 접수 완료 — 접수번호: AS-2024-00456. 제품: '{product_name}', 증상: '{symptom}'. 엔지니어 방문 예정일: 2~3영업일 이내",
+        "parameters": [
+          {
+            "name": "product_name",
+            "description": "A/S 대상 제품명 (예: 정수기, 공기청정기)"
+          },
+          {
+            "name": "symptom",
+            "description": "고장 증상 상세 설명"
+          }
+        ]
       },
       {
         "name": "check_warranty",
-        "description": "제품의 보증기간을 확인합니다. 제품명 또는 시리얼번호를 입력하세요.",
-        "mock_response": "'{query}' 제품 보증 상태: 무상 보증기간 내 (만료일: 2025-12-31)"
+        "description": "제품의 보증기간을 확인합니다.",
+        "mock_response": "'{serial_number}' 제품 보증 상태: 무상 보증기간 내 (만료일: 2025-12-31)",
+        "parameters": [
+          {
+            "name": "serial_number",
+            "description": "제품 시리얼번호 또는 제품명"
+          }
+        ]
       }
     ]
   },
-  "hello": {
-    "key": "hello",
-    "description": "인사 담당",
-    "prompt": "당신은 인사 담당 전문 에이전트입니다.\n고객의 인사 담당 관련 문의를 전문적으로 처리합니다.\n필요한 정보는 도구를 적극 활용하여 정확하게 안내하세요.\n항상 친절하고 전문적으로 한국어로 답변하세요.",
+  "customer": {
+    "key": "customer",
+    "description": "고객정보 조회, 본인확인, 계약자 확인, 연락처 입력, 생년월일 인증 관련 상담",
+    "prompt": "당신은 고객정보 조회 및 본인확인 전문 에이전트입니다.\n고객의 계약자 정보를 확인하고 본인 인증을 처리합니다.\n연락처가 미입력된 경우 전화번호 입력을 안내하고, 생년월일 불일치 시 재입력을 요청합니다.\n항상 친절하고 전문적으로 한국어로 답변하세요.",
     "tools": [
       {
-        "name": "weather-search",
-        "description": "오늘 날씨",
-        "mock_response": "맑음"
+        "name": "lookup_customer_by_phone",
+        "description": "계약자의 전화번호로 고객정보를 조회합니다. 연락처가 미입력된 경우 전화번호를 입력받아 조회합니다.",
+        "mock_response": "전화번호 '{phone_number}'(으)로 조회한 결과, 계약자명: 홍길동, 계약번호: CT-2024-00123, 계약상품: 정수기 렌탈 (36개월). 고객정보 확인이 완료되었습니다.",
+        "parameters": [
+          {
+            "name": "phone_number",
+            "description": "계약자 전화번호 (예: 01012345678)"
+          }
+        ]
+      },
+      {
+        "name": "verify_customer_birthday",
+        "description": "계약자의 생년월일로 본인확인을 진행합니다. 생년월일이 불일치하면 재입력을 요청합니다.",
+        "mock_response": "생년월일 '{birthday}'(으)로 본인확인을 진행합니다. 본인확인이 완료되었습니다. 계약자: 홍길동님, 인증 성공.",
+        "parameters": [
+          {
+            "name": "birthday",
+            "description": "계약자 생년월일 6자리 (예: 810902)"
+          }
+        ]
       }
     ]
   }

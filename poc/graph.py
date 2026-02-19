@@ -4,10 +4,12 @@ import time
 from typing import Optional, Any, AsyncIterator
 
 from langchain.agents import create_agent
-from langchain.messages import SystemMessage, AIMessage, HumanMessage, AIMessageChunk
+from langchain.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import AIMessageChunk
 from langchain_core.tools import StructuredTool
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
+from pydantic import BaseModel, Field as PydanticField, create_model
 
 from poc.state import SupervisorState
 from poc.registry import AgentRegistry, AgentConfig, ToolConfig
@@ -33,23 +35,48 @@ SUPERVISOR_PROMPT_TEMPLATE = """\
 
 
 def _build_tools(tool_configs: list[ToolConfig]) -> list[StructuredTool]:
-    """ToolConfig 목록을 LangChain StructuredTool로 변환합니다."""
+    """ToolConfig 목록을 LangChain StructuredTool로 변환합니다.
+
+    parameters가 정의된 도구: 동적 Pydantic 스키마 생성 (예: phone_number, birthday)
+    parameters가 없는 도구: 기본 query: str 단일 파라미터 (하위 호환)
+    """
     tools = []
     for tc in tool_configs:
 
-        def _make_handler(response_template: str):
-            def handler(query: str) -> str:
-                if "{query}" in response_template:
-                    return response_template.format(query=query)
-                return response_template
+        if tc.parameters:
+            # 동적 Pydantic 입력 스키마 생성
+            field_definitions = {
+                p.name: (str, PydanticField(description=p.description))
+                for p in tc.parameters
+            }
+            input_schema = create_model(f"{tc.name}_input", **field_definitions)
 
-            return handler
+            def _make_param_handler(response_template: str):
+                def handler(**kwargs) -> str:
+                    return response_template.format(**kwargs)
+                return handler
 
-        tool = StructuredTool.from_function(
-            func=_make_handler(tc.mock_response),
-            name=tc.name,
-            description=tc.description,
-        )
+            tool = StructuredTool.from_function(
+                func=_make_param_handler(tc.mock_response),
+                name=tc.name,
+                description=tc.description,
+                args_schema=input_schema,
+            )
+        else:
+            # 하위 호환: 단일 query 파라미터
+            def _make_query_handler(response_template: str):
+                def handler(query: str) -> str:
+                    if "{query}" in response_template:
+                        return response_template.format(query=query)
+                    return response_template
+                return handler
+
+            tool = StructuredTool.from_function(
+                func=_make_query_handler(tc.mock_response),
+                name=tc.name,
+                description=tc.description,
+            )
+
         tools.append(tool)
     return tools
 
@@ -61,7 +88,10 @@ def _config_hash(config: AgentConfig) -> str:
     """AgentConfig의 해시 (프롬프트+도구 변경 감지용)."""
     data = {
         "prompt": config.prompt,
-        "tools": [(t.name, t.description, t.mock_response) for t in config.tools],
+        "tools": [
+            (t.name, t.description, t.mock_response, [(p.name, p.description) for p in t.parameters])
+            for t in config.tools
+        ],
     }
     return hashlib.md5(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
