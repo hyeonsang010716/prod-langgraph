@@ -1,4 +1,4 @@
-"""Supervisor Multi-Agent 상담봇 POC (Dynamic Agent Registry)
+"""Supervisor Multi-Agent 상담봇 POC (Dynamic Agent + Tool Registry)
 
 실행:
     uv run python -m poc.main
@@ -17,6 +17,9 @@ from poc.registry import AgentRegistry
 PERSIST_PATH = str(Path(__file__).parent / "agents.json")
 
 
+# ===== CLI Helper Functions =====
+
+
 def _print_agents(registry: AgentRegistry) -> None:
     agents = registry.list_all()
     if not agents:
@@ -24,10 +27,26 @@ def _print_agents(registry: AgentRegistry) -> None:
         return
     print("\n  등록된 에이전트:")
     for key, config in agents.items():
-        print(f"    - {key}: {config.description}")
+        tool_names = ", ".join(t.name for t in config.tools) or "없음"
+        print(f"    [{key}] {config.description}")
+        print(f"      도구: {tool_names}")
 
 
-def _handle_add(registry: AgentRegistry) -> None:
+def _print_tools(registry: AgentRegistry, agent_key: str) -> None:
+    config = registry.get(agent_key)
+    if not config:
+        print(f"  '{agent_key}' 에이전트를 찾을 수 없습니다.")
+        return
+    if not config.tools:
+        print(f"  [{agent_key}] 등록된 도구 없음")
+        return
+    print(f"\n  [{agent_key}] 도구 목록:")
+    for t in config.tools:
+        print(f"    - {t.name}: {t.description}")
+        print(f"      응답: {t.mock_response[:60]}...")
+
+
+def _handle_add_agent(registry: AgentRegistry) -> None:
     key = input("  에이전트 키 (영문): ").strip()
     if not key:
         print("  취소되었습니다.")
@@ -42,14 +61,15 @@ def _handle_add(registry: AgentRegistry) -> None:
     else:
         prompt = (
             f"당신은 {description} 전문 에이전트입니다.\n"
-            f"고객의 {description} 관련 문의를 전문적으로 처리합니다.\n\n"
+            f"고객의 {description} 관련 문의를 전문적으로 처리합니다.\n"
+            "필요한 정보는 도구를 적극 활용하여 정확하게 안내하세요.\n"
             "항상 친절하고 전문적으로 한국어로 답변하세요."
         )
     registry.register(key, description, prompt)
     print(f"  '{key}' 에이전트가 추가되었습니다.")
 
 
-def _handle_remove(registry: AgentRegistry, arg: str) -> None:
+def _handle_remove_agent(registry: AgentRegistry, arg: str) -> None:
     key = arg or input("  삭제할 에이전트 키: ").strip()
     if not key:
         print("  취소되었습니다.")
@@ -60,19 +80,60 @@ def _handle_remove(registry: AgentRegistry, arg: str) -> None:
         print(f"  '{key}' 에이전트를 찾을 수 없습니다.")
 
 
+def _handle_add_tool(registry: AgentRegistry) -> None:
+    agent_key = input("  대상 에이전트 키: ").strip()
+    if not agent_key or not registry.get(agent_key):
+        print(f"  '{agent_key}' 에이전트를 찾을 수 없습니다.")
+        return
+    name = input("  도구 이름 (영문): ").strip()
+    if not name:
+        print("  취소되었습니다.")
+        return
+    description = input("  도구 설명 (LLM이 보는 설명): ").strip()
+    if not description:
+        print("  취소되었습니다.")
+        return
+    mock = input("  목업 응답 ({query}로 입력값 치환): ").strip()
+    if not mock:
+        mock = "'{query}'에 대한 처리가 완료되었습니다."
+    registry.add_tool(agent_key, name, description, mock)
+    print(f"  [{agent_key}] '{name}' 도구가 추가되었습니다.")
+
+
+def _handle_remove_tool(registry: AgentRegistry) -> None:
+    agent_key = input("  대상 에이전트 키: ").strip()
+    tool_name = input("  삭제할 도구 이름: ").strip()
+    if registry.remove_tool(agent_key, tool_name):
+        print(f"  [{agent_key}] '{tool_name}' 도구가 삭제되었습니다.")
+    else:
+        print("  도구를 찾을 수 없습니다.")
+
+
 def _print_help() -> None:
     print(
-        "\n  명령어:\n"
-        "    /list          등록된 에이전트 목록\n"
-        "    /add           새 에이전트 추가\n"
-        "    /remove <key>  에이전트 삭제\n"
-        "    /new           새 세션 시작\n"
-        "    /help          이 도움말"
+        "\n  === 상담 ===\n"
+        "    메시지 입력        상담 대화\n"
+        "\n"
+        "  === 에이전트 관리 ===\n"
+        "    /list              에이전트 + 도구 목록\n"
+        "    /add               에이전트 추가\n"
+        "    /remove <key>      에이전트 삭제\n"
+        "\n"
+        "  === 도구 관리 ===\n"
+        "    /tools <key>       에이전트의 도구 상세\n"
+        "    /add-tool          도구 추가\n"
+        "    /remove-tool       도구 삭제\n"
+        "\n"
+        "  === 세션 ===\n"
+        "    /new               새 세션 시작\n"
+        "    /help              이 도움말"
     )
 
 
+# ===== Main Loop =====
+
+
 async def main() -> None:
-    # 초기화
     get_llm_manager().initialize()
 
     registry = AgentRegistry(persist_path=PERSIST_PATH)
@@ -84,7 +145,7 @@ async def main() -> None:
     is_first = True
 
     print("=" * 60)
-    print("  Supervisor Multi-Agent 상담봇 (Dynamic)")
+    print("  Supervisor Multi-Agent 상담봇 (Dynamic Agent + Tool)")
     print("  /help 로 명령어 확인  |  Ctrl+C 종료")
     print("=" * 60)
     _print_agents(registry)
@@ -108,9 +169,18 @@ async def main() -> None:
             if cmd == "/list":
                 _print_agents(registry)
             elif cmd == "/add":
-                _handle_add(registry)
+                _handle_add_agent(registry)
             elif cmd == "/remove":
-                _handle_remove(registry, arg)
+                _handle_remove_agent(registry, arg)
+            elif cmd == "/tools":
+                if arg:
+                    _print_tools(registry, arg)
+                else:
+                    _print_agents(registry)
+            elif cmd == "/add-tool":
+                _handle_add_tool(registry)
+            elif cmd == "/remove-tool":
+                _handle_remove_tool(registry)
             elif cmd == "/new":
                 session_id = str(uuid.uuid4())
                 is_first = True
@@ -141,10 +211,9 @@ async def main() -> None:
         elif status == "completed":
             print(f"\n[시스템] {result['answer']}")
             print(f"  ({result['execution_time']:.2f}s)")
-            # 종료 후 자동으로 새 세션 준비
             session_id = str(uuid.uuid4())
             is_first = True
-            print("  (새 세션이 자동 시작되었습니다. 바로 다음 문의를 입력하세요.)")
+            print("  (새 세션 준비 완료)")
 
         elif status == "error":
             print(f"\n[에러] {result['message']}")

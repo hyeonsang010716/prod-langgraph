@@ -1,12 +1,16 @@
+import hashlib
+import json
 import time
 from typing import Optional, Any
 
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain.agents import create_agent
+from langchain.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.tools import StructuredTool
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
 
 from poc.state import SupervisorState
-from poc.registry import AgentRegistry
+from poc.registry import AgentRegistry, AgentConfig, ToolConfig
 from app.core.llm_manager import ModelName, get_llm_manager
 
 
@@ -25,18 +29,88 @@ SUPERVISOR_PROMPT_TEMPLATE = """\
 4. 이전 대화 맥락을 고려하여 자연스럽게 라우팅합니다."""
 
 
+# ===== Tool Factory =====
+
+
+def _build_tools(tool_configs: list[ToolConfig]) -> list[StructuredTool]:
+    """ToolConfig 목록을 LangChain StructuredTool로 변환합니다."""
+    tools = []
+    for tc in tool_configs:
+
+        def _make_handler(response_template: str):
+            def handler(query: str) -> str:
+                if "{query}" in response_template:
+                    return response_template.format(query=query)
+                return response_template
+
+            return handler
+
+        tool = StructuredTool.from_function(
+            func=_make_handler(tc.mock_response),
+            name=tc.name,
+            description=tc.description,
+        )
+        tools.append(tool)
+    return tools
+
+
+# ===== Agent Cache =====
+
+
+def _config_hash(config: AgentConfig) -> str:
+    """AgentConfig의 해시 (프롬프트+도구 변경 감지용)."""
+    data = {
+        "prompt": config.prompt,
+        "tools": [(t.name, t.description, t.mock_response) for t in config.tools],
+    }
+    return hashlib.md5(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+class _AgentCache:
+    """create_react_agent 서브그래프 캐시
+
+    에이전트 설정(프롬프트, 도구)이 변경될 때만 서브그래프를 재생성합니다.
+    동일 설정이면 캐시된 서브그래프를 재사용합니다.
+    """
+
+    def __init__(self):
+        self._graphs: dict[str, Any] = {}
+        self._hashes: dict[str, str] = {}
+
+    def get_or_create(self, config: AgentConfig, model: Any) -> Any:
+        h = _config_hash(config)
+        if self._hashes.get(config.key) != h:
+            tools = _build_tools(config.tools)
+            agent = create_agent(
+                model=model,
+                tools=tools,
+                system_prompt=config.prompt,
+                name=config.key,
+            )
+            self._graphs[config.key] = agent
+            self._hashes[config.key] = h
+        return self._graphs[config.key]
+
+    def invalidate(self, key: str) -> None:
+        self._graphs.pop(key, None)
+        self._hashes.pop(key, None)
+
+
+# ===== Graph Orchestrator =====
+
+
 class SupervisorGraphOrchestrator:
     """Dynamic Supervisor 기반 멀티 에이전트 오케스트레이터
 
-    그래프 구조는 고정 (supervisor ↔ agent),
-    에이전트 행동은 AgentRegistry에서 동적으로 결정됩니다.
-
-    - 에이전트 추가/삭제 시 그래프 재컴파일 불필요
-    - Supervisor 프롬프트와 라우팅 스키마가 매 호출마다 레지스트리에서 동적 생성
-    - 스키마/프롬프트는 레지스트리 version 기반 캐싱으로 불필요한 재생성 방지
+    - 부모 그래프: 고정 구조 (supervisor ↔ agent)
+    - 에이전트 노드: create_react_agent 서브그래프를 동적 생성/캐싱
+    - 에이전트/도구 추가·삭제 시 그래프 재컴파일 불필요
 
     그래프 플로우:
-        START → supervisor → agent → (interrupt/resume) → supervisor → ... → END
+        START → supervisor → agent(서브그래프) → (interrupt) → supervisor → ... → END
+
+    서브그래프 내부:
+        agent(LLM) → tools → agent(LLM) → ... → 최종 응답
     """
 
     def __init__(self, registry: AgentRegistry):
@@ -48,30 +122,28 @@ class SupervisorGraphOrchestrator:
         """그래프를 빌드하고 컴파일합니다."""
         model = self._llm_manager.get_model(ModelName.GPT_4O_MINI)
         registry = self._registry
+        agent_cache = _AgentCache()
 
-        # 캐시: 레지스트리 버전이 바뀔 때만 스키마/프롬프트 재생성
-        _cache: dict = {"version": -1, "llm": None, "prompt": ""}
+        # Supervisor 스키마/프롬프트 캐시
+        _sv_cache: dict = {"version": -1, "llm": None, "prompt": ""}
 
-        def _refresh_cache() -> None:
-            """레지스트리 변경 시 supervisor LLM과 프롬프트를 갱신합니다."""
-            if registry.version == _cache["version"]:
+        def _refresh_supervisor_cache() -> None:
+            if registry.version == _sv_cache["version"]:
                 return
             schema = registry.build_route_schema()
-            _cache["llm"] = model.with_structured_output(schema)
-            _cache["prompt"] = SUPERVISOR_PROMPT_TEMPLATE.format(
+            _sv_cache["llm"] = model.with_structured_output(schema)
+            _sv_cache["prompt"] = SUPERVISOR_PROMPT_TEMPLATE.format(
                 agent_descriptions=registry.get_descriptions()
             )
-            _cache["version"] = registry.version
+            _sv_cache["version"] = registry.version
 
         # ── Supervisor 노드 ──
         async def supervisor_node(state: SupervisorState) -> Command:
-            """사용자 메시지를 분석하여 적절한 에이전트로 라우팅합니다."""
-            _refresh_cache()
+            _refresh_supervisor_cache()
 
-            messages = [SystemMessage(content=_cache["prompt"])] + state["messages"]
-            decision = await _cache["llm"].ainvoke(messages)
-
-            next_agent = decision.next.value  # Enum → str
+            messages = [SystemMessage(content=_sv_cache["prompt"])] + state["messages"]
+            decision = await _sv_cache["llm"].ainvoke(messages)
+            next_agent = decision.next.value
 
             if next_agent == "end":
                 farewell = AIMessage(
@@ -87,14 +159,12 @@ class SupervisorGraphOrchestrator:
                 update={"active_agent": next_agent},
             )
 
-        # ── 범용 에이전트 노드 ──
+        # ── 범용 에이전트 노드 (create_react_agent 서브그래프 실행) ──
         async def agent_node(state: SupervisorState) -> dict:
-            """active_agent에 해당하는 프롬프트를 동적 로드하여 응답합니다."""
             agent_key = state["active_agent"]
             config = registry.get(agent_key)
 
             if not config:
-                # 세션 도중 에이전트가 삭제된 경우
                 error_msg = (
                     f"'{agent_key}' 상담 서비스가 현재 이용 불가합니다. "
                     "다른 문의를 해주세요."
@@ -107,18 +177,27 @@ class SupervisorGraphOrchestrator:
                     ],
                 }
 
-            messages = [SystemMessage(content=config.prompt)] + state["messages"]
-            response: AIMessage = await model.ainvoke(messages)
+            # 서브그래프 캐시에서 가져오기 (설정 변경 시 자동 재생성)
+            sub_agent = agent_cache.get_or_create(config, model)
 
+            # 서브그래프 실행: LLM → Tool → LLM → ... → 최종 응답
+            result = await sub_agent.ainvoke({"messages": state["messages"]})
+
+            # 최종 AI 응답 추출
+            last_ai_content = ""
+            for msg in reversed(result["messages"]):
+                if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
+                    last_ai_content = msg.content
+                    break
+
+            # interrupt: 응답을 클라이언트에 전달하고 일시 중단
             user_input = interrupt(
-                {
-                    "agent": agent_key,
-                    "message": response.content,
-                }
+                {"agent": agent_key, "message": last_ai_content}
             )
 
+            # 서브그래프의 새 메시지 + 사용자 새 메시지를 반환
             return {
-                "messages": [response, HumanMessage(content=user_input)],
+                "messages": result["messages"] + [HumanMessage(content=user_input)],
             }
 
         # ── 고정 그래프 구조 ──
@@ -184,7 +263,6 @@ class SupervisorGraphOrchestrator:
         return self._build_completed_response(result, execution_time)
 
     async def _extract_interrupt_info(self, config: dict) -> dict:
-        """중단된 그래프에서 interrupt 정보를 추출합니다."""
         state = await self._graph.aget_state(config)
         interrupts = []
         for task in state.tasks:
@@ -204,7 +282,6 @@ class SupervisorGraphOrchestrator:
 
     @staticmethod
     def _build_completed_response(result: dict, execution_time: float) -> dict:
-        """완료된 그래프 결과를 응답 형태로 구성합니다."""
         answer = ""
         for msg in reversed(result["messages"]):
             if isinstance(msg, AIMessage) and msg.content and not msg.tool_calls:
@@ -220,5 +297,4 @@ class SupervisorGraphOrchestrator:
         }
 
     def get_graph(self) -> Any:
-        """컴파일된 그래프를 반환합니다."""
         return self._graph

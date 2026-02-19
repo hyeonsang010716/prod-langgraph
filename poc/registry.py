@@ -1,6 +1,6 @@
 import json
 import threading
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -8,16 +8,40 @@ from typing import Optional
 from pydantic import BaseModel, Field as PydanticField
 
 
+# ===== Config Dataclasses =====
+
+
+@dataclass
+class ToolConfig:
+    """에이전트 도구 설정
+
+    name: 도구 이름 (영문, 에이전트 내 고유)
+    description: LLM이 도구를 선택할 때 참고하는 설명
+    mock_response: POC용 목업 응답 ({query}로 입력값 치환 가능)
+    """
+
+    name: str
+    description: str
+    mock_response: str
+
+
 @dataclass
 class AgentConfig:
-    """에이전트 설정"""
+    """에이전트 설정
+
+    key: 에이전트 고유 키 (영문)
+    description: Supervisor가 라우팅 시 참고하는 설명
+    prompt: 에이전트 시스템 프롬프트
+    tools: 에이전트가 사용할 도구 목록
+    """
 
     key: str
     description: str
     prompt: str
+    tools: list[ToolConfig] = field(default_factory=list)
 
 
-# ===== 기본 에이전트 (첫 실행 시 시드) =====
+# ===== Default Agents =====
 
 DEFAULT_AGENTS = [
     AgentConfig(
@@ -25,56 +49,76 @@ DEFAULT_AGENTS = [
         description="렌탈 계약, 렌탈 기간, 렌탈 비용, 렌탈 상품 관련 상담",
         prompt=(
             "당신은 렌탈 상담 전문 에이전트입니다.\n"
-            "고객의 렌탈 관련 문의를 전문적으로 처리합니다.\n\n"
-            "담당 업무:\n"
-            "- 렌탈 상품 안내 및 추천\n"
-            "- 렌탈 계약 조건 설명\n"
-            "- 렌탈 기간 및 비용 안내\n"
-            "- 렌탈 연장/해지 절차 안내\n\n"
+            "고객의 렌탈 관련 문의를 전문적으로 처리합니다.\n"
+            "필요한 정보는 도구를 적극 활용하여 정확하게 안내하세요.\n"
             "항상 친절하고 전문적으로 한국어로 답변하세요."
         ),
+        tools=[
+            ToolConfig(
+                name="check_rental_price",
+                description="렌탈 상품의 월 렌탈료를 조회합니다. 상품명을 입력하세요.",
+                mock_response="'{query}' 상품의 월 렌탈료는 35,000원입니다. (약정기간: 36개월, 등록비: 무료)",
+            ),
+            ToolConfig(
+                name="check_rental_availability",
+                description="렌탈 상품의 재고 및 렌탈 가능 여부를 확인합니다.",
+                mock_response="'{query}' 상품은 현재 렌탈 가능합니다. 설치 가능일: 3영업일 이내",
+            ),
+        ],
     ),
     AgentConfig(
         key="delivery",
         description="배송 조회, 배송 일정, 배송지 변경, 배송 관련 상담",
         prompt=(
             "당신은 배송 상담 전문 에이전트입니다.\n"
-            "고객의 배송 관련 문의를 전문적으로 처리합니다.\n\n"
-            "담당 업무:\n"
-            "- 배송 상태 조회 및 안내\n"
-            "- 배송 일정 확인\n"
-            "- 배송지 변경 처리\n"
-            "- 배송 지연/분실 대응\n\n"
+            "고객의 배송 관련 문의를 전문적으로 처리합니다.\n"
+            "필요한 정보는 도구를 적극 활용하여 정확하게 안내하세요.\n"
             "항상 친절하고 전문적으로 한국어로 답변하세요."
         ),
+        tools=[
+            ToolConfig(
+                name="track_delivery",
+                description="주문번호로 배송 상태를 조회합니다.",
+                mock_response="주문 '{query}'의 배송 상태: 배송중 (현재 OO물류센터 → 고객 지역 배송 예정)",
+            ),
+            ToolConfig(
+                name="change_delivery_address",
+                description="배송지 주소를 변경합니다. 새 주소를 입력하세요.",
+                mock_response="배송지가 '{query}'(으)로 변경 요청되었습니다. 확인 후 반영됩니다.",
+            ),
+        ],
     ),
     AgentConfig(
         key="service",
         description="A/S 접수, 수리, 점검, 서비스 관련 상담",
         prompt=(
             "당신은 서비스(A/S) 상담 전문 에이전트입니다.\n"
-            "고객의 서비스 관련 문의를 전문적으로 처리합니다.\n\n"
-            "담당 업무:\n"
-            "- A/S 접수 및 진행 상황 안내\n"
-            "- 제품 수리/점검 상담\n"
-            "- 서비스 이용 방법 안내\n"
-            "- 보증 기간 및 무상/유상 서비스 안내\n\n"
+            "고객의 서비스 관련 문의를 전문적으로 처리합니다.\n"
+            "필요한 정보는 도구를 적극 활용하여 정확하게 안내하세요.\n"
             "항상 친절하고 전문적으로 한국어로 답변하세요."
         ),
+        tools=[
+            ToolConfig(
+                name="submit_service_request",
+                description="A/S 요청을 접수합니다. 증상을 설명해주세요.",
+                mock_response="A/S 접수 완료 — 접수번호: AS-2024-{query}. 엔지니어 방문 예정일: 2~3영업일 이내",
+            ),
+            ToolConfig(
+                name="check_warranty",
+                description="제품의 보증기간을 확인합니다. 제품명 또는 시리얼번호를 입력하세요.",
+                mock_response="'{query}' 제품 보증 상태: 무상 보증기간 내 (만료일: 2025-12-31)",
+            ),
+        ],
     ),
 ]
 
 
 class AgentRegistry:
-    """Thread-safe 에이전트 레지스트리
+    """Thread-safe 에이전트+도구 레지스트리
 
-    에이전트 설정을 런타임에 동적으로 추가/삭제할 수 있습니다.
+    에이전트와 도구를 런타임에 동적으로 추가/삭제할 수 있습니다.
     변경 시 JSON 파일에 자동 저장되며, 시작 시 자동 로드됩니다.
-
-    Usage:
-        registry = AgentRegistry("poc/agents.json")
-        registry.register("payment", "결제 관련 상담", "당신은 결제 전문 에이전트입니다...")
-        registry.unregister("payment")
+    version 속성으로 변경 감지 → 서브그래프 캐시 무효화에 사용합니다.
     """
 
     def __init__(self, persist_path: Optional[str] = None):
@@ -88,23 +132,24 @@ class AgentRegistry:
         else:
             self._seed_defaults()
 
-    def _seed_defaults(self) -> None:
-        """기본 에이전트로 초기화합니다."""
-        for config in DEFAULT_AGENTS:
-            self._agents[config.key] = config
-        self._save()
+    # ── Agent CRUD ──
 
     def register(self, key: str, description: str, prompt: str) -> AgentConfig:
-        """에이전트를 등록합니다. 이미 존재하면 덮어씁니다."""
+        """에이전트를 등록합니다. 이미 존재하면 덮어씁니다 (도구는 유지)."""
         with self._lock:
-            config = AgentConfig(key=key, description=description, prompt=prompt)
+            existing_tools = []
+            if key in self._agents:
+                existing_tools = self._agents[key].tools
+            config = AgentConfig(
+                key=key, description=description, prompt=prompt, tools=existing_tools
+            )
             self._agents[key] = config
             self._version += 1
             self._save()
             return config
 
     def unregister(self, key: str) -> bool:
-        """에이전트를 삭제합니다. 성공 시 True."""
+        """에이전트를 삭제합니다 (도구 포함)."""
         with self._lock:
             if key in self._agents:
                 del self._agents[key]
@@ -114,34 +159,64 @@ class AgentRegistry:
             return False
 
     def get(self, key: str) -> Optional[AgentConfig]:
-        """에이전트 설정을 조회합니다."""
         return self._agents.get(key)
 
     def list_all(self) -> dict[str, AgentConfig]:
-        """모든 에이전트를 조회합니다."""
         return dict(self._agents)
+
+    # ── Tool CRUD ──
+
+    def add_tool(
+        self, agent_key: str, name: str, description: str, mock_response: str
+    ) -> ToolConfig:
+        """에이전트에 도구를 추가합니다."""
+        with self._lock:
+            config = self._agents.get(agent_key)
+            if not config:
+                raise KeyError(f"'{agent_key}' 에이전트가 존재하지 않습니다.")
+            # 같은 이름 도구가 있으면 교체
+            config.tools = [t for t in config.tools if t.name != name]
+            tool = ToolConfig(
+                name=name, description=description, mock_response=mock_response
+            )
+            config.tools.append(tool)
+            self._version += 1
+            self._save()
+            return tool
+
+    def remove_tool(self, agent_key: str, tool_name: str) -> bool:
+        """에이전트에서 도구를 삭제합니다."""
+        with self._lock:
+            config = self._agents.get(agent_key)
+            if not config:
+                return False
+            original_len = len(config.tools)
+            config.tools = [t for t in config.tools if t.name != tool_name]
+            if len(config.tools) < original_len:
+                self._version += 1
+                self._save()
+                return True
+            return False
+
+    # ── Query Helpers ──
 
     @property
     def version(self) -> int:
-        """레지스트리 버전 (변경 시마다 증가, 스키마 캐시 무효화에 사용)"""
+        """레지스트리 버전 (변경 시마다 증가, 캐시 무효화에 사용)"""
         return self._version
 
     def get_descriptions(self) -> str:
         """Supervisor 프롬프트용 에이전트 설명을 생성합니다."""
         lines = []
         for key, config in self._agents.items():
-            lines.append(f"- {key}: {config.description}")
+            tool_names = ", ".join(t.name for t in config.tools) or "없음"
+            lines.append(f"- {key}: {config.description} (도구: {tool_names})")
         return "\n".join(lines)
 
     def build_route_schema(self) -> type[BaseModel]:
-        """현재 등록된 에이전트 기반으로 라우팅 Pydantic 스키마를 동적 생성합니다.
-
-        동적 Enum을 사용하여 with_structured_output에서 LLM이
-        유효한 에이전트 키만 선택하도록 강제합니다.
-        """
+        """현재 등록된 에이전트 기반으로 라우팅 스키마를 동적 생성합니다."""
         choices = {k: k for k in self._agents}
         choices["end"] = "end"
-
         RouteEnum = Enum("RouteEnum", choices)
 
         class RouteDecision(BaseModel):
@@ -153,6 +228,13 @@ class AgentRegistry:
             )
 
         return RouteDecision
+
+    # ── Persistence ──
+
+    def _seed_defaults(self) -> None:
+        for config in DEFAULT_AGENTS:
+            self._agents[config.key] = config
+        self._save()
 
     def _save(self) -> None:
         if not self._persist_path:
@@ -167,4 +249,6 @@ class AgentRegistry:
             return
         data = json.loads(self._persist_path.read_text())
         for key, config_dict in data.items():
-            self._agents[key] = AgentConfig(**config_dict)
+            tools_raw = config_dict.pop("tools", [])
+            tools = [ToolConfig(**t) for t in tools_raw]
+            self._agents[key] = AgentConfig(**config_dict, tools=tools)
