@@ -191,32 +191,44 @@ async def main() -> None:
                 print(f"  알 수 없는 명령어: {cmd} (/help)")
             continue
 
-        # ── 상담 채팅 ──
+        # ── 상담 채팅 (스트리밍) ──
         if is_first:
-            result = await orchestrator.ainvoke(user_input, session_id)
+            stream = orchestrator.astream_invoke(user_input, session_id)
             is_first = False
         else:
-            result = await orchestrator.aresume(session_id, user_input)
+            stream = orchestrator.astream_resume(session_id, user_input)
 
-        status = result["status"]
+        agent_name = ""
+        print()  # 응답 전 줄바꿈
 
-        if status == "interrupted":
-            for intr in result["interrupt_info"].get("interrupts", []):
-                value = intr["value"]
-                agent = value.get("agent", "unknown")
-                message = value.get("message", "")
-                print(f"\n[{agent}] {message}")
-            print(f"  ({result['execution_time']:.2f}s)")
+        async for event in stream:
+            event_type = event["type"]
 
-        elif status == "completed":
-            print(f"\n[시스템] {result['answer']}")
-            print(f"  ({result['execution_time']:.2f}s)")
-            session_id = str(uuid.uuid4())
-            is_first = True
-            print("  (새 세션 준비 완료)")
+            if event_type == "token":
+                print(event["content"], end="", flush=True)
 
-        elif status == "error":
-            print(f"\n[에러] {result['message']}")
+            elif event_type == "interrupt":
+                agent_name = event.get("agent", "")
+
+            elif event_type == "end":
+                print()  # 토큰 출력 후 줄바꿈
+                status = event["status"]
+                exec_time = event["execution_time"]
+
+                if status == "interrupted":
+                    if agent_name:
+                        print(f"  [{agent_name}] ({exec_time:.2f}s)")
+                    else:
+                        print(f"  ({exec_time:.2f}s)")
+
+                elif status == "completed":
+                    print(f"  ({exec_time:.2f}s)")
+                    session_id = str(uuid.uuid4())
+                    is_first = True
+                    print("  (새 세션 준비 완료)")
+
+            elif event_type == "error":
+                print(f"\n[에러] {event['message']}")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 import hashlib
 import json
 import time
-from typing import Optional, Any
+from typing import Optional, Any, AsyncIterator
 
 from langchain.agents import create_agent
-from langchain.messages import SystemMessage, AIMessage, HumanMessage
+from langchain.messages import SystemMessage, AIMessage, HumanMessage, AIMessageChunk
 from langchain_core.tools import StructuredTool
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
@@ -295,6 +295,110 @@ class SupervisorGraphOrchestrator:
             "execution_time": execution_time,
             "messages": result["messages"],
         }
+
+    # ── Streaming ──
+
+    async def astream_invoke(
+        self, question: str, session_id: str
+    ) -> AsyncIterator[dict]:
+        """새 대화를 스트리밍으로 시작합니다."""
+        input_data = {
+            "messages": [{"role": "user", "content": question}],
+            "active_agent": "",
+        }
+        config = {"configurable": {"thread_id": session_id}}
+        async for event in self._astream_graph(input_data, config):
+            yield event
+
+    async def astream_resume(
+        self, session_id: str, message: str
+    ) -> AsyncIterator[dict]:
+        """interrupt된 그래프를 스트리밍으로 재개합니다."""
+        config = {"configurable": {"thread_id": session_id}}
+
+        state = await self._graph.aget_state(config)
+        if not state.next:
+            yield {"type": "error", "message": "재개할 interrupt가 없습니다."}
+            return
+
+        async for event in self._astream_graph(Command(resume=message), config):
+            yield event
+
+    async def _astream_graph(
+        self, input_data, config: dict
+    ) -> AsyncIterator[dict]:
+        """공통 스트리밍 로직.
+
+        stream_mode=["messages", "updates"] + subgraphs=True 로
+        create_agent 서브그래프의 LLM 토큰을 실시간 스트리밍합니다.
+        """
+        start_time = time.perf_counter()
+
+        async for chunk in self._graph.astream(
+            input_data,
+            config,
+            stream_mode=["messages", "updates"],
+            subgraphs=True,
+        ):
+            # subgraphs=True → (namespace_tuple, mode, payload)
+            if len(chunk) == 3:
+                ns, mode, payload = chunk
+            else:
+                mode, payload = chunk
+                ns = ()
+
+            if mode == "messages":
+                message, metadata = payload
+                # 서브그래프(create_agent)의 AIMessageChunk만 스트리밍
+                # ns가 비어있으면 부모 그래프(supervisor) → 필터링
+                if (
+                    isinstance(message, AIMessageChunk)
+                    and message.content
+                    and len(ns) > 0
+                ):
+                    yield {
+                        "type": "token",
+                        "content": message.content,
+                    }
+
+            elif mode == "updates":
+                if "__interrupt__" in payload:
+                    for intr_data in payload["__interrupt__"]:
+                        value = (
+                            intr_data.value
+                            if hasattr(intr_data, "value")
+                            else intr_data
+                        )
+                        yield {
+                            "type": "interrupt",
+                            "agent": (
+                                value.get("agent", "")
+                                if isinstance(value, dict)
+                                else ""
+                            ),
+                            "message": (
+                                value.get("message", "")
+                                if isinstance(value, dict)
+                                else str(value)
+                            ),
+                        }
+
+        # 스트림 종료 후 최종 상태 확인
+        execution_time = time.perf_counter() - start_time
+        state = await self._graph.aget_state(config)
+
+        if state.next:
+            yield {
+                "type": "end",
+                "status": "interrupted",
+                "execution_time": execution_time,
+            }
+        else:
+            yield {
+                "type": "end",
+                "status": "completed",
+                "execution_time": execution_time,
+            }
 
     def get_graph(self) -> Any:
         return self._graph

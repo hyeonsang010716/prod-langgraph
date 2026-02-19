@@ -1,3 +1,5 @@
+from typing import AsyncIterator
+
 from poc.graph import SupervisorGraphOrchestrator
 from poc.registry import AgentRegistry
 
@@ -21,6 +23,20 @@ class PocService:
 
     async def resume(self, session_id: str, message: str) -> dict:
         return await self._graph.aresume(session_id, message)
+
+    # ── Streaming Chat ──
+
+    async def stream_chat(
+        self, question: str, session_id: str
+    ) -> AsyncIterator[dict]:
+        async for event in self._graph.astream_invoke(question, session_id):
+            yield event
+
+    async def stream_resume(
+        self, session_id: str, message: str
+    ) -> AsyncIterator[dict]:
+        async for event in self._graph.astream_resume(session_id, message):
+            yield event
 
     # ── Agent Management ──
 
